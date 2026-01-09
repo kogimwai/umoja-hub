@@ -2,8 +2,10 @@ import { Link } from 'react-router-dom'
 
 export default function Home() {
   return (
-    <div style={{ padding: 40 }}>
-      <h1>Umoja Hub</h1>
+    <div style={{ padding: 40, textAlign: 'center' }}>
+      <h1>Welcome to Umoja Hub</h1>
+
+      <br />
 
       <Link to="/register">
         <button>Create Account</button>
