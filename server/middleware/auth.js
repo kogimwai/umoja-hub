@@ -11,3 +11,7 @@ module.exports = (req, res, next) => {
     res.status(401).json({ error: 'Invalid token' })
   }
 }
+const auth = require('./middleware/auth')
+
+app.post('/api/portfolio', auth, upload.single('image'), ...)
+app.post('/api/jobs', auth, ...)
