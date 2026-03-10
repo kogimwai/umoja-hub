@@ -1,0 +1,150 @@
+const express = require('express');
+const router = express.Router();
+const axios = require('axios');
+const auth = require('../middleware/auth');
+
+// ── M-Pesa STK Push ──
+router.post('/mpesa/stk-push', auth, async (req, res) => {
+  try {
+    const { phone, amount, itemId, description } = req.body;
+
+    // Format phone number to 254XXXXXXXXX
+    const formattedPhone = phone.startsWith('0')
+      ? `254${phone.slice(1)}`
+      : phone.startsWith('+')
+        ? phone.slice(1)
+        : phone;
+
+    // Get M-Pesa token
+    const credentials = Buffer.from(
+      `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
+    ).toString('base64');
+
+    const tokenRes = await axios.get(
+      'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
+      { headers: { Authorization: `Basic ${credentials}` } }
+    );
+
+    const token = tokenRes.data.access_token;
+
+    // Generate timestamp and password
+    const timestamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+    const password = Buffer.from(
+      `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
+    ).toString('base64');
+
+    // Send STK Push
+    const stkRes = await axios.post(
+      'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+      {
+        BusinessShortCode: process.env.MPESA_SHORTCODE,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: 'CustomerPayBillOnline',
+        Amount: Math.ceil(amount),
+        PartyA: formattedPhone,
+        PartyB: process.env.MPESA_SHORTCODE,
+        PhoneNumber: formattedPhone,
+        CallBackURL: `${process.env.API_BASE_URL}/api/payments/mpesa/callback`,
+        AccountReference: `UMOJA-${itemId}`,
+        TransactionDesc: description || 'Umoja Hub Payment',
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    res.json({
+      message: 'STK push sent. Check your phone.',
+      checkoutRequestId: stkRes.data.CheckoutRequestID,
+    });
+  } catch (error) {
+    console.error('M-Pesa error:', error.response?.data || error.message);
+    res.status(500).json({ message: 'M-Pesa payment failed. Please try again.' });
+  }
+});
+
+// ── M-Pesa Callback ──
+router.post('/mpesa/callback', async (req, res) => {
+  const body = req.body?.Body?.stkCallback;
+  if (body?.ResultCode === 0) {
+    const meta = body.CallbackMetadata?.Item || [];
+    const amount = meta.find(i => i.Name === 'Amount')?.Value;
+    const mpesaRef = meta.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
+    const phone = meta.find(i => i.Name === 'PhoneNumber')?.Value;
+    console.log('M-Pesa payment confirmed:', { amount, mpesaRef, phone });
+  }
+  res.json({ ResultCode: 0, ResultDesc: 'Success' });
+});
+
+// ── PayPal ──
+router.post('/paypal/create-order', auth, async (req, res) => {
+  try {
+    const { itemId, amount } = req.body;
+
+    const tokenRes = await axios.post(
+      `${process.env.PAYPAL_BASE_URL}/v1/oauth2/token`,
+      'grant_type=client_credentials',
+      {
+        auth: {
+          username: process.env.PAYPAL_CLIENT_ID,
+          password: process.env.PAYPAL_SECRET,
+        },
+      }
+    );
+
+    const ppToken = tokenRes.data.access_token;
+    const usdAmount = (amount / 130).toFixed(2);
+
+    const orderRes = await axios.post(
+      `${process.env.PAYPAL_BASE_URL}/v2/checkout/orders`,
+      {
+        intent: 'CAPTURE',
+        purchase_units: [{
+          amount: { currency_code: 'USD', value: usdAmount },
+          custom_id: itemId,
+        }],
+        application_context: {
+          return_url: `${process.env.CLIENT_URL}/payment/success`,
+          cancel_url: `${process.env.CLIENT_URL}/payment/cancel`,
+        },
+      },
+      { headers: { Authorization: `Bearer ${ppToken}` } }
+    );
+
+    const approvalUrl = orderRes.data.links.find(l => l.rel === 'approve')?.href;
+    res.json({ approvalUrl, orderId: orderRes.data.id });
+  } catch (error) {
+    console.error('PayPal error:', error.response?.data);
+    res.status(500).json({ message: 'PayPal payment failed' });
+  }
+});
+
+// ── Stripe (Visa/Mastercard) ──
+router.post('/stripe/create-session', auth, async (req, res) => {
+  try {
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const { itemId, amount } = req.body;
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'kes',
+          unit_amount: amount * 100,
+          product_data: { name: `Umoja Hub Purchase` },
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.CLIENT_URL}/payment/cancel`,
+      metadata: { itemId },
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('Stripe error:', error.message);
+    res.status(500).json({ message: 'Card payment failed' });
+  }
+});
+
+module.exports = router;
