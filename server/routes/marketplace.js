@@ -1,0 +1,135 @@
+const express = require('express');
+const router = express.Router();
+const Product = require('../models/Product');
+const auth = require('../middleware/auth');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+// GET all items with filters
+router.get('/', async (req, res) => {
+  try {
+    const { q, type, artType, page = 1, limit = 16, sort = 'newest' } = req.query;
+    const filter = { status: { $ne: 'deleted' } };
+
+    if (q) filter.$text = { $search: q };
+    if (type && type !== 'all') filter.type = type;
+    if (artType && artType !== 'All') filter.artType = artType;
+
+    const sortOpts = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      price_asc: { price: 1 },
+      price_desc: { price: -1 },
+      ending_soon: { auctionEnd: 1 },
+    };
+
+    const total = await Product.countDocuments(filter);
+    const items = await Product.find(filter)
+      .populate('artist', 'name avatar verified')
+      .sort(sortOpts[sort] || sortOpts.newest)
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .lean();
+
+    res.json({ items, total, page: Number(page) });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// GET single item
+router.get('/:id', async (req, res) => {
+  try {
+    const item = await Product.findById(req.params.id)
+      .populate('artist', 'name avatar bio verified')
+      .populate('bids.bidder', 'name avatar');
+    if (!item) return res.status(404).json({ message: 'Not found' });
+    res.json(item);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// POST create new listing
+router.post('/', auth, upload.single('image'), async (req, res) => {
+  try {
+    const {
+      title, description, price, type,
+      artType, medium, dimensions,
+      auctionEnd, startingBid
+    } = req.body;
+
+    let imageUrl = '';
+    if (req.file) {
+      const result = await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_stream(
+          { folder: 'umoja-hub/marketplace', quality: 'auto', format: 'webp' },
+          (err, res) => err ? reject(err) : resolve(res)
+        ).end(req.file.buffer);
+      });
+      imageUrl = result.secure_url;
+    }
+
+    const product = await Product.create({
+      title,
+      description,
+      price: type === 'auction' ? undefined : Number(price),
+      startingBid: type === 'auction' ? Number(startingBid) : undefined,
+      currentBid: type === 'auction' ? Number(startingBid) : undefined,
+      type: type || 'for_sale',
+      artType,
+      medium,
+      dimensions,
+      auctionEnd: type === 'auction' ? new Date(auctionEnd) : undefined,
+      image: imageUrl,
+      artist: req.user.id,
+    });
+
+    await product.populate('artist', 'name avatar');
+    res.status(201).json(product);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+// POST place a bid
+router.post('/:id/bid', auth, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const item = await Product.findById(req.params.id);
+
+    if (!item) return res.status(404).json({ message: 'Item not found' });
+    if (item.type !== 'auction') return res.status(400).json({ message: 'Not an auction' });
+    if (new Date(item.auctionEnd) < new Date()) return res.status(400).json({ message: 'Auction has ended' });
+    if (amount <= (item.currentBid || 0)) return res.status(400).json({ message: `Bid must exceed KES ${item.currentBid?.toLocaleString()}` });
+    if (item.artist.toString() === req.user.id) return res.status(400).json({ message: "You can't bid on your own item" });
+
+    item.currentBid = amount;
+    item.bids.unshift({ bidder: req.user.id, amount, placedAt: new Date() });
+    await item.save();
+    await item.populate('bids.bidder', 'name avatar');
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(req.params.id).emit('new-bid', {
+        amount,
+        bidder: { name: req.user.name, id: req.user.id },
+        placedAt: new Date(),
+      });
+    }
+
+    res.json({ currentBid: item.currentBid, bids: item.bids });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+module.exports = router;
