@@ -1,7 +1,152 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: sans-serif;
+:root {
+  --gold: #D4A017;
+  --gold-light: #E8B84B;
+  --terra: #C1440E;
+  --forest: #1E3A1A;
+  --cream: #F5ECD7;
+  --dark: #0F0E0B;
+  --mid: #1C1A16;
+  --muted: #8A8070;
 }
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--dark);
+  color: var(--cream);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Maasai-inspired subtle pattern overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 40px,
+    rgba(212, 160, 23, 0.015) 40px,
+    rgba(212, 160, 23, 0.015) 41px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Glass morphism */
+.glass {
+  background: rgba(28, 26, 22, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(212, 160, 23, 0.15);
+}
+
+/* Gold glow effect */
+.glow-gold {
+  box-shadow: 0 0 20px rgba(212, 160, 23, 0.3),
+              0 0 40px rgba(212, 160, 23, 0.1);
+}
+
+.glow-gold-text {
+  text-shadow: 0 0 20px rgba(212, 160, 23, 0.5);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--dark); }
+::-webkit-scrollbar-thumb {
+  background: var(--gold);
+  border-radius: 3px;
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulseGold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 160, 23, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(212, 160, 23, 0); }
+}
+
+@keyframes bidFlash {
+  0%   { background-color: rgba(212, 160, 23, 0.3); }
+  100% { background-color: transparent; }
+}
+
+.animate-fade-up   { animation: fadeUp 0.5s ease forwards; }
+.animate-fade-in   { animation: fadeIn 0.4s ease forwards; }
+.animate-pulse-gold { animation: pulseGold 2s infinite; }
+.animate-bid-flash  { animation: bidFlash 1s ease; }
+
+/* Mobile bottom nav */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 14, 11, 0.95);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(212, 160, 23, 0.2);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  z-index: 50;
+}
+
+.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  text-decoration: none;
+  transition: color 0.2s;
+  padding: 4px 12px;
+}
+
+.bottom-nav a.active,
+.bottom-nav a:hover {
+  color: var(--gold);
+}
+
+/* AI Chat bubbles */
+.chat-bubble-user {
+  background: linear-gradient(135deg, var(--gold), var(--terra));
+  color: var(--dark);
+  border-radius: 18px 18px 4px 18px;
+  padding: 10px 14px;
+  max-width: 80%;
+  align-self: flex-end;
+  font-weight: 500;
+}
+
+.chat-bubble-ai {
+  background: rgba(28, 26, 22, 0.9);
+  border: 1px solid rgba(212, 160, 23, 0.2);
+  border-radius: 18px 18px 18px 4px;
+  padding: 10px 1
