@@ -1,42 +1,65 @@
-const bcrypt = require('bcryptjs')
-const jwt = require('jsonwebtoken')
-const User = require('./models/User')
-const express = require('express')
-const cors = require('cors')
-const multer = require('multer')
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
+require('dotenv').config();
 
-const app = express()
-app.use(cors())
-app.use(express.json())
+const app = express();
+const server = http.createServer(app);
 
-const upload = multer({ storage: multer.memoryStorage() })
+const io = new Server(server, {
+  path: '/api/socket',
+  cors: {
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    methods: ['GET', 'POST'],
+  },
+});
 
-app.post('/api/portfolio', upload.single('image'), (req, res) => {
-  res.json({ success: true })
-})
+app.set('io', io);
 
-app.post('/api/jobs', (req, res) => {
-  res.json({ success: true })
-})
+// Middleware
+app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
+app.use(express.json());
 
-app.listen(5000, () => {
-  console.log('Server running on http://localhost:5000')
-})
-app.post('/api/register', async (req, res) => {
-  const { email, password } = req.body
-  const hashed = await bcrypt.hash(password, 10)
-  const user = await User.create({ email, password: hashed })
-  res.json({ success: true })
-})
+// Routes
+app.use('/api/auth',        require('./routes/auth'));
+app.use('/api/jobs',        require('./routes/jobs'));
+app.use('/api/marketplace', require('./routes/marketplace'));
+app.use('/api/payments',    require('./routes/payments'));
+app.use('/api/ai',          require('./routes/ai'));
+app.use('/api/users',       require('./routes/users'));
+app.use('/api/dashboard',   require('./routes/dashboard'));
 
-app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body
-  const user = await User.findOne({ email })
-  if (!user) return res.status(400).json({ error: 'User not found' })
+// Health check
+app.get('/api/health', (req, res) => res.json({ status: 'ok', env: process.env.NODE_ENV }));
 
-  const match = await bcrypt.compare(password, user.password)
-  if (!match) return res.status(400).json({ error: 'Wrong password' })
+// Socket.io — auction rooms
+io.on('connection', (socket) => {
+  console.log('Socket connected:', socket.id);
 
-  const token = jwt.sign({ id: user._id }, 'SECRET_KEY')
-  res.json({ token })
-})
+  socket.on('join-auction', (auctionId) => {
+    socket.join(auctionId);
+    console.log(`${socket.id} joined auction ${auctionId}`);
+  });
+
+  socket.on('leave-auction', (auctionId) => {
+    socket.leave(auctionId);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Socket disconnected:', socket.id);
+  });
+});
+
+// MongoDB + Start
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log('✅ MongoDB connected');
+    const PORT = process.env.PORT || 5000;
+    server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  })
+  .catch(err => {
+    console.error('❌ MongoDB connection failed:', err.message);
+    process.exit(1);
+  });
